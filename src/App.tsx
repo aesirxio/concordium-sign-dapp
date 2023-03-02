@@ -9,7 +9,6 @@ import { errorString } from './util';
 import { useConnection } from '@concordium/react-components';
 import { useConnect } from '@concordium/react-components';
 import './scss/app.scss';
-
 export default function App() {
   const [network, setNetwork] = useState(TESTNET);
   return (
