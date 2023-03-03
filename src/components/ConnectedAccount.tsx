@@ -2,6 +2,7 @@ import { Network, WalletConnection, withJsonRpcClient } from '@concordium/react-
 import { useEffect, useState } from 'react';
 import { AccountInfo } from '@concordium/web-sdk';
 import { Alert, Button, Col, Form, Row } from 'react-bootstrap';
+import { Buffer } from 'buffer';
 
 interface Props {
   network: Network;
@@ -36,7 +37,8 @@ export function ConnectedAccount({ connection, account, network }: Props) {
   const handleSignMessage = async () => {
     if (connection && account) {
       let result = await connection.signMessage(account, input);
-      result[0]['0'] && setSignature(result[0]['0']);
+      const signedNonce = Buffer.from(JSON.stringify(result), 'utf-8').toString('base64');
+      signedNonce && setSignature(signedNonce);
     }
   };
   return (
@@ -61,7 +63,7 @@ export function ConnectedAccount({ connection, account, network }: Props) {
                 <Col sm="12">
                   <Alert variant="info">
                     <ul className="mb-0">
-                      <li>Signature: {signature}</li>
+                      <li className="text-break">Signature: {signature}</li>
                     </ul>
                   </Alert>
                 </Col>
