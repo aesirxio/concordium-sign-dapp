@@ -7,12 +7,13 @@ Run
 ```shell
 yarn install
 ```
+
 to install dependencies.
 
 ### Configure
 
 1. Rename the `.env.dist` file to `.env`.
-1. Replace variables in the `.env` file with your environment.
+1. Replace variables in the `.env` file with your variables.
    1. `REACT_APP_TESTNET_GENESIS_BLOCK_HASH` replace this with your `Testnet Genesis Block Hash`
    2. `REACT_APP_TESTNET_JSON_RPC_URL` replace this with your `Testnet JSON-RPC URL`
    3. `REACT_APP_TESTNET_CCD_SCAN_BASE_URL` replace this with your `Testnet CCD Scan Base URL`
