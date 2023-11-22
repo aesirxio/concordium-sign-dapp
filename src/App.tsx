@@ -1,14 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { Alert, Button, Col, Container, Row, Spinner } from 'react-bootstrap';
-import { useWalletConnectorSelector, withJsonRpcClient } from '@concordium/react-components';
+import {
+  MAINNET,
+  TESTNET,
+  useGrpcClient,
+  useWalletConnectorSelector,
+} from '@concordium/react-components';
 import { WalletConnectionProps, WithWalletConnector } from '@concordium/react-components';
 import { ConnectedAccount } from './components/ConnectedAccount';
 import { NetworkSelector } from './NetworkSelector';
-import { BROWSER_WALLET, MAINNET, TESTNET } from './config';
+import { BROWSER_WALLET } from './config';
 import { errorString } from './util';
 import { useConnection } from '@concordium/react-components';
 import { useConnect } from '@concordium/react-components';
 import './scss/app.scss';
+import { BlockHash } from '@concordium/web-sdk';
 export default function App() {
   const [network, setNetwork] = useState(TESTNET);
   return (
@@ -51,16 +57,15 @@ function Main(props: WalletConnectionProps) {
     connection,
     props
   );
-
+  const rpc = useGrpcClient(network);
   useEffect(() => {
-    if (connection) {
+    if (rpc) {
       setRpcGenesisHash(undefined);
-      withJsonRpcClient(connection, async (rpc) => {
-        const status = await rpc.getConsensusStatus();
-        return status.genesisBlock;
-      })
+      rpc
+        .getConsensusStatus()
+        .then((status) => status.genesisBlock)
         .then((hash) => {
-          setRpcGenesisHash(hash);
+          setRpcGenesisHash(BlockHash.toHexString(hash));
           setRpcError('');
         })
         .catch((err) => {
@@ -71,7 +76,7 @@ function Main(props: WalletConnectionProps) {
     if (activeConnector && !account) {
       connect();
     }
-  }, [connection, genesisHash, network, account, activeConnector, connect]);
+  }, [rpc, account, connect, activeConnector]);
 
   const verb = isConnected ? 'Disconnect' : 'Connect';
 
@@ -95,7 +100,7 @@ function Main(props: WalletConnectionProps) {
       {!activeConnectorError && activeConnectorType && !activeConnector && <Spinner />}
       {connectError && <Alert variant="danger">Connection error: {connectError}.</Alert>}
 
-      <ConnectedAccount connection={connection} account={account} network={network} />
+      <ConnectedAccount connection={connection} account={account} network={network} rpc={rpc} />
       <Row className="mt-3 mb-3">
         <Col>
           {account && (
