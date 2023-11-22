@@ -1,12 +1,24 @@
-import { Network, WalletConnection, withJsonRpcClient } from '@concordium/react-components';
-import { useEffect, useState } from 'react';
-import { AccountInfo, AccountTransactionType } from '@concordium/web-sdk';
+import {
+  Network,
+  TESTNET,
+  WalletConnection,
+  binaryMessageFromHex,
+  stringMessage,
+  typeSchemaFromBase64,
+} from '@concordium/react-components';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  AccountAddress,
+  AccountTransactionSignature,
+  AccountTransactionType,
+  ConcordiumGRPCClient,
+} from '@concordium/web-sdk';
 
 import { Alert, Button, Col, Form, Row } from 'react-bootstrap';
 import { Buffer } from 'buffer';
-import { TESTNET } from '../config';
 import axios from 'axios';
-import { detectConcordiumProvider } from '@concordium/browser-wallet-api-helpers';
+import { errorString } from '../util';
+import { ResultAsync, err, ok } from 'neverthrow';
 
 export enum RewardType {
   BakingReward = 'BakingReward',
@@ -51,60 +63,99 @@ interface Props {
   network: Network;
   connection: WalletConnection | undefined;
   account: string | undefined;
-}
-
-interface Signature {
-  base64: string | undefined;
-  raw: string | undefined;
+  rpc: ConcordiumGRPCClient | undefined;
 }
 
 function ccdScanUrl(network: Network, activeConnectedAccount: string | undefined) {
   return `${network.ccdScanBaseUrl}/?dcount=1&dentity=account&daddress=${activeConnectedAccount}`;
 }
 
-export function ConnectedAccount({ connection, account, network }: Props) {
-  const [info, setInfo] = useState<AccountInfo>();
+export function ConnectedAccount({ network, connection, account, rpc }: Props) {
+  const [info, setInfo] = useState<any>();
   const [infoError, setInfoError] = useState('');
-  const [input, setInput] = useState('');
-  const [signature, setSignature] = useState<Signature>();
   useEffect(() => {
-    if (connection && account) {
+    if (rpc && account) {
       setInfo(undefined);
-      withJsonRpcClient(connection, (rpc) => rpc.getAccountInfo(account))
-        .then((res) => {
+      rpc
+        .getAccountInfo(AccountAddress.fromBase58(account))
+        .then((res: any) => {
           setInfo(res);
           setInfoError('');
         })
-        .catch((err) => {
+        .catch((err: any) => {
           setInfo(undefined);
-          setInfoError(err);
+          setInfoError(errorString(err));
         });
     }
-  }, [connection, account]);
+  }, [rpc, account]);
 
-  const handleSignMessage = async () => {
-    if (connection && account) {
-      let result = await connection.signMessage(account, input);
+  const [signature, setSignature] = useState<AccountTransactionSignature>('');
+  const [error, setError] = useState('');
+  const [isWaiting, setIsWaiting] = useState(false);
 
-      const signedNonce = Buffer.from(JSON.stringify(result), 'utf-8').toString('base64');
+  const [messageInput, setMessageInput] = useState('');
+  const [schemaInput, setSchemaInput] = useState('');
 
-      if (signedNonce) {
-        setSignature({ ...signature, ...{ base64: signedNonce, raw: result[0]['0'] } });
-      }
+  const schemaResult = useMemo(() => {
+    if (!schemaInput) {
+      return undefined;
     }
-  };
+    try {
+      return ok(typeSchemaFromBase64(schemaInput));
+    } catch (e) {
+      return err(errorString(e));
+    }
+  }, [schemaInput]);
+  const messageResult = useMemo(() => {
+    if (!messageInput) {
+      return undefined;
+    }
+    if (!schemaResult) {
+      // Empty schema implies string message.
+      return ok(stringMessage(messageInput));
+    }
+    try {
+      // Map schema result to message with input.
+      // Return undefined if schema result is an error to avoid double reporting it.
+      return schemaResult.match(
+        (s) => ok(binaryMessageFromHex(messageInput, s)),
+        () => undefined
+      );
+    } catch (e) {
+      return err(errorString(e));
+    }
+  }, [messageInput, schemaResult]);
+  const handleMessageInput = useCallback((e: any) => setMessageInput(e.target.value), []);
+  const handleSubmit = useCallback(() => {
+    console.log('connection', connection);
+    console.log('account', account);
+    console.log('messageResult', messageResult);
+    if (connection && account && messageResult) {
+      messageResult
+        .asyncAndThen((msg) => {
+          setError('');
+          setIsWaiting(true);
+          return ResultAsync.fromPromise(connection.signMessage(account, msg), errorString);
+        })
+        .match(setSignature, setError)
+        .finally(() => setIsWaiting(false));
+    }
+  }, [connection, account, messageResult]);
 
   const handleRequestCCD = async () => {
     if (info) {
       await axios.put(
-        `https://wallet-proxy.testnet.concordium.com/v0/testnetGTUDrop/${info.accountAddress}`
+        `https://wallet-proxy.testnet.concordium.com/v0/testnetGTUDrop/${info.accountAddress?.address}`
       );
     }
   };
-
   return (
     <>
-      {infoError && <Alert variant="danger">Error querying account info: {infoError}</Alert>}
+      {infoError && (
+        <Alert variant="danger">
+          Error querying account info: {infoError && decodeURI(infoError)}
+        </Alert>
+      )}
       {account && (
         <>
           <hr />
@@ -125,11 +176,15 @@ export function ConnectedAccount({ connection, account, network }: Props) {
                   <Col sm="12">
                     <Alert variant="info">
                       <ul className="mb-0">
-                        <li className="text-break">Raw: {signature.raw}</li>
+                        <li className="text-break">Raw: {signature && signature[0][0]}</li>
                       </ul>
 
                       <ul className="mb-0">
-                        <li className="text-break">Base64: {signature.base64}</li>
+                        <li className="text-break">
+                          Base64:{' '}
+                          {signature &&
+                            Buffer.from(JSON.stringify(signature), 'utf-8').toString('base64')}
+                        </li>
                       </ul>
                     </Alert>
                   </Col>
@@ -141,15 +196,15 @@ export function ConnectedAccount({ connection, account, network }: Props) {
                         <Form.Control
                           type="text"
                           placeholder="Message"
-                          value={input}
-                          onChange={(e) => setInput(e.currentTarget.value)}
+                          value={messageInput}
+                          onChange={handleMessageInput}
                           autoFocus
                         />
                       </Form.Group>
                       <Button
                         className="w-auto mx-auto px-2"
                         variant={'primary'}
-                        onClick={handleSignMessage}
+                        onClick={handleSubmit}
                       >
                         Sign Message
                       </Button>
@@ -179,14 +234,14 @@ export function ConnectedAccount({ connection, account, network }: Props) {
   );
 }
 
-function Details({ account }: { account: AccountInfo }) {
+function Details({ account }: { account: any }) {
   return (
     <>
       <Alert variant="info">
         <ul className="mb-0">
-          <li>Address: {account.accountAddress}</li>
-          <li>Nonce: {account.accountNonce.toString()}</li>
-          <li>Balance: {account.accountAmount.toString()}</li>
+          <li>Address: {account.accountAddress?.address}</li>
+          <li>Nonce: {account.accountNonce?.value.toString()}</li>
+          <li>Balance: {account.accountAmount?.microCcdAmount.toString()}</li>
           <li>Index: {account.accountIndex.toString()}</li>
         </ul>
       </Alert>
